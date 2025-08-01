@@ -1,4 +1,4 @@
-# from kafka import KafkaProducer
+from kafka import KafkaProducer
 import requests, time, json
 import os
 from dotenv import load_dotenv
@@ -8,9 +8,11 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
 STOCK_DATA_API_KEY = os.getenv("API_KEY")
 STOCK_TICKERS = ["META", "TSLA", "GS", "VOD"]
 
-# producer = KafkaProducer(
-#     bootstrap_servers="localhost:9092",
-#     value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+producer = KafkaProducer(
+    bootstrap_servers="localhost:29092",
+    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+    request_timeout_ms=30000
+)
 
 def stock_data(TICKER):
     try:    
@@ -45,6 +47,8 @@ def schedule_producer_events():
                         "volume": data_point["volume"]
                     }
                     print(payload)
+                    producer.send("stock_data", value=payload)
+                    print("Stock data Kafka message sent.")
         # Time series API give the last half hour of time series data
         time.sleep(60 * 30)
 
