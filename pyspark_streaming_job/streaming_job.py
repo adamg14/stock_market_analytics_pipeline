@@ -2,13 +2,24 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, avg, window, to_timestamp, count
 from pyspark.sql.types import StructType, StringType, FloatType
 import time
+import os
+import sys
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from snowflake_connection.connection import snowflake_connection_params
 
 # add before getOrCreate
 # for latest updates only 
     # .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoints/stock_data") \
 spark = SparkSession.builder \
     .appName("StockDataStreamProcessor") \
-    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0") \
+    .config("spark.jars.packages",
+            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0",
+            "net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
@@ -75,6 +86,8 @@ while True:
         if result:
             current_count = result[0]["total_rows"]
             print(f"Current row count: {current_count}")
+            if current_count != 0:
+                break
         else:
             print("Waiting for data... (0 rows processed so far)")
     except Exception as e:
@@ -83,9 +96,12 @@ while True:
     time.sleep(5)
 
 # querying the parsed json data to verify it fits with the schema
+# ADD .option("checkpointLocation", "/tmp/checkpoints/stock_data_snowflake") before .start()
 query = parsed_json.writeStream \
     .outputMode("append") \
-    .format("console") \
+    .format("snowflake") \
+    .options(**snowflake_connection_params) \
+    .option("dbtable", "RAW_PRICES") \
     .option("truncate", False) \
     .start()
 
@@ -93,5 +109,4 @@ query.awaitTermination()
 
 # CONVERT DATETIME COLUMN FROM STRINGTYPE TO DATETIME OBJECT
 # code snippet: df = df.withColumn("timestamp_col", to_timestamp("string_datetime_col", "yyyy-MM-dd HH:mm:ss"))
-print("hello world")
 
