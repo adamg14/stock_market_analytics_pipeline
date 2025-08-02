@@ -1,7 +1,11 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, avg, window, to_timestamp
+from pyspark.sql.functions import col, from_json, avg, window, to_timestamp, count
 from pyspark.sql.types import StructType, StringType, FloatType
+import time
 
+# add before getOrCreate
+# for latest updates only 
+    # .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoints/stock_data") \
 spark = SparkSession.builder \
     .appName("StockDataStreamProcessor") \
     .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0") \
@@ -22,6 +26,7 @@ schema = StructType() \
     .add("close", StringType()) \
     .add("volume", StringType()) 
 
+# # change startingOffsets to latests for latest updates only
 stock_df = spark.readStream.format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:29092") \
     .option("subscribe", "stock_data") \
@@ -54,6 +59,28 @@ parsed_json = parsed_json \
         "volume",
         col("volume").cast(FloatType())
     )
+
+# querying the number of rows to verify length of dataframe
+count_query = parsed_json.agg(count("*").alias("total_rows")) \
+    .writeStream \
+    .outputMode("complete") \
+    .format("memory") \
+    .queryName("row_counts") \
+    .start()
+
+# check for the result of the above query
+while True:
+    try:
+        result = spark.sql("SELECT * FROM row_counts").collect()
+        if result:
+            current_count = result[0]["total_rows"]
+            print(f"Current row count: {current_count}")
+        else:
+            print("Waiting for data... (0 rows processed so far)")
+    except Exception as e:
+        print(f"Error checking count: {str(e)}")
+    
+    time.sleep(5)
 
 # querying the parsed json data to verify it fits with the schema
 query = parsed_json.writeStream \
