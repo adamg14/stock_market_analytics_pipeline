@@ -12,14 +12,18 @@ if project_root not in sys.path:
 
 from snowflake_connection.connection import snowflake_connection_params
 
+packages = [
+    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0",
+    "net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3"
+]
 # add before getOrCreate
 # for latest updates only 
     # .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoints/stock_data") \
 spark = SparkSession.builder \
     .appName("StockDataStreamProcessor") \
     .config("spark.jars.packages",
-            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0",
-            "net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3") \
+            ","
+            .join(packages)) \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
@@ -103,10 +107,11 @@ query = parsed_json.writeStream \
     .options(**snowflake_connection_params) \
     .option("dbtable", "RAW_PRICES") \
     .option("truncate", False) \
-    .start()
+    .load()
 
 query.awaitTermination()
 
+print("DataFrame added to snowflake db.")
 # CONVERT DATETIME COLUMN FROM STRINGTYPE TO DATETIME OBJECT
 # code snippet: df = df.withColumn("timestamp_col", to_timestamp("string_datetime_col", "yyyy-MM-dd HH:mm:ss"))
 
