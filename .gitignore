@@ -1,3 +1,4 @@
 .env
 rsa_key.pem
 rsa_key.pub
+snowflake_key.pem

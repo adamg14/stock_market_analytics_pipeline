@@ -101,15 +101,19 @@ while True:
 
 # querying the parsed json data to verify it fits with the schema
 # ADD .option("checkpointLocation", "/tmp/checkpoints/stock_data_snowflake") before .start()
-query = parsed_json.writeStream \
-    .outputMode("append") \
-    .format("snowflake") \
+
+def write_to_snowflake(batch_df, batch_id):
+    batch_df.write.format("snowflake") \
     .options(**snowflake_connection_params) \
     .option("dbtable", "RAW_PRICES") \
-    .option("truncate", False) \
-    .load()
+    .mode("append") \
+    .save()
 
-query.awaitTermination()
+parsed_json.writeStream \
+    .foreachBatch(write_to_snowflake) \
+    .option("checkpointLocation", "/tmp/checkpoints/stk") \
+    .start() \
+    .awaitTermination()
 
 print("DataFrame added to snowflake db.")
 # CONVERT DATETIME COLUMN FROM STRINGTYPE TO DATETIME OBJECT
