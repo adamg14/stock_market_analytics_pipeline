@@ -1,33 +1,38 @@
+import sys, os, time
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, avg, window, to_timestamp, count
+from pyspark.sql.functions import from_json, col, to_timestamp
 from pyspark.sql.types import StructType, StringType, FloatType
-import time
-import os
-import sys
+from dotenv import load_dotenv
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if root not in sys.path:
+    sys.path.insert(0, root)
 
+# load Snowflake connection parameters
+load_dotenv(os.path.join(root, ".env"))
 from snowflake_connection.connection import snowflake_connection_params
 
-packages = [
-    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0",
-    "net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3"
-]
-# add before getOrCreate
-# for latest updates only 
-    # .config("spark.sql.streaming.checkpointLocation", "/tmp/checkpoints/stock_data") \
+# start the Spark session with the required packages to make a connection to the snowflake DB
 spark = SparkSession.builder \
     .appName("StockDataStreamProcessor") \
     .config("spark.jars.packages",
-            ","
-            .join(packages)) \
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,"
+        "net.snowflake:spark-snowflake_2.12:3.0.0") \
+    .config("spark.driver.memory", "2g") \
+    .config("spark.executor.memory", "2g") \
+    .config("spark.driver.maxResultSize", "1g") \
+    .config("spark.sql.adaptive.enabled", "false") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
 
+# loggin the version to the console for verification 
+print(f"Spark session created successfully")
+print(f"Spark version: {spark.version}")
+print(f"Java version: {spark.sparkContext._jvm.System.getProperty('java.version')}")
+
+# define the JSON schema of the Kafka Messages
 schema = StructType() \
     .add("ticker", StringType()) \
     .add("interval", StringType()) \
@@ -39,83 +44,59 @@ schema = StructType() \
     .add("high", StringType()) \
     .add("low", StringType()) \
     .add("close", StringType()) \
-    .add("volume", StringType()) 
+    .add("volume", StringType())
 
-# # change startingOffsets to latests for latest updates only
-stock_df = spark.readStream.format("kafka") \
+# read from Kafka messages
+df = spark.readStream \
+    .format("kafka") \
     .option("kafka.bootstrap.servers", "localhost:29092") \
     .option("subscribe", "stock_data") \
     .option("startingOffsets", "earliest") \
-    .load()
+    .option("failOnDataLoss", "false") \
+    .load() \
+  .select(from_json(col("value").cast("string"), schema).alias("d")) \
+  .select("d.*") \
+  .withColumn("datetime", to_timestamp("datetime","yyyy-MM-dd HH:mm:ss")) \
+  .withColumn("open",  col("open").cast(FloatType())) \
+  .withColumn("high",  col("high").cast(FloatType())) \
+  .withColumn("low",   col("low").cast(FloatType())) \
+  .withColumn("close", col("close").cast(FloatType())) \
+  .withColumn("volume",col("volume").cast(FloatType()))
 
-# parse the json kafka message using PySpark
-parsed_json = stock_df.select(
-    from_json(col("value").cast("string"), schema).alias("parsed_data")
-).select("parsed_data.*")
+# write micro-batches to Snowflake
+def write_snowflake(batch_df, batch_id):
+    try:
+        if batch_df.count() > 0:
+            print(f"Processing batch {batch_id} with {batch_df.count()} records...")
+            batch_df.write \
+                .format("snowflake") \
+                .options(**snowflake_connection_params) \
+                .option("dbtable", "RAW_PRICES") \
+                .option("maxOffsetsPerTrigger", "1000") \
+                .mode("append") \
+                .save()
+            print(f"Batch {batch_id}: Successfully written {batch_df.count()} records to Snowflake")
+        else:
+            print(f"Batch {batch_id}: No data to process")
+    except Exception as e:
+        print(f"Batch {batch_id} error: {e}")
 
-# converting columns to the correct data type
-parsed_json = parsed_json \
-    .withColumn(
-        "datetime", 
-        to_timestamp(col("datetime"), "yyyy-MM-dd HH:mm:ss")) \
-    .withColumn(
-        "open",
-        col("open").cast(FloatType())
-    ) \
-    .withColumn(
-        "low",
-        col("low").cast(FloatType())
-    ) \
-    .withColumn(
-        "close",
-        col("close").cast(FloatType())
-    ) \
-    .withColumn(
-        "volume",
-        col("volume").cast(FloatType())
-    )
-
-# querying the number of rows to verify length of dataframe
-count_query = parsed_json.agg(count("*").alias("total_rows")) \
-    .writeStream \
-    .outputMode("complete") \
-    .format("memory") \
-    .queryName("row_counts") \
+# start streaming query
+print("Starting streaming query...")
+query = df.writeStream \
+    .trigger(processingTime="10 seconds") \
+    .foreachBatch(write_snowflake) \
     .start()
 
-# check for the result of the above query
-while True:
-    try:
-        result = spark.sql("SELECT * FROM row_counts").collect()
-        if result:
-            current_count = result[0]["total_rows"]
-            print(f"Current row count: {current_count}")
-            if current_count != 0:
-                break
-        else:
-            print("Waiting for data... (0 rows processed so far)")
-    except Exception as e:
-        print(f"Error checking count: {str(e)}")
-    
-    time.sleep(5)
-
-# querying the parsed json data to verify it fits with the schema
-# ADD .option("checkpointLocation", "/tmp/checkpoints/stock_data_snowflake") before .start()
-
-def write_to_snowflake(batch_df, batch_id):
-    batch_df.write.format("snowflake") \
-    .options(**snowflake_connection_params) \
-    .option("dbtable", "RAW_PRICES") \
-    .mode("append") \
-    .save()
-
-parsed_json.writeStream \
-    .foreachBatch(write_to_snowflake) \
-    .option("checkpointLocation", "/tmp/checkpoints/stk") \
-    .start() \
-    .awaitTermination()
-
-print("DataFrame added to snowflake db.")
-# CONVERT DATETIME COLUMN FROM STRINGTYPE TO DATETIME OBJECT
-# code snippet: df = df.withColumn("timestamp_col", to_timestamp("string_datetime_col", "yyyy-MM-dd HH:mm:ss"))
-
+try:
+    print("Streaming job is running.")
+    query.awaitTermination()
+except KeyboardInterrupt:
+    print("Stopping streaming job...")
+    query.stop()
+except Exception as e:
+    print(f"Streaming job error: {e}")
+    query.stop()
+finally:
+    spark.stop()
+    print("Spark session stopped. Done!")
