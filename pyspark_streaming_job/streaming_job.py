@@ -1,24 +1,26 @@
 import sys, os, time
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, to_timestamp
+from pyspark.sql.functions import from_json, col, to_timestamp, current_timestamp
 from pyspark.sql.types import StructType, StringType, FloatType
 from dotenv import load_dotenv
 
+load_dotenv(os.path.join(os.path.dirname(__file__), '../.env'))
 
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if root not in sys.path:
     sys.path.insert(0, root)
 
-# load Snowflake connection parameters
 load_dotenv(os.path.join(root, ".env"))
-from snowflake_connection.connection import snowflake_connection_params
+
+from redshift_connection.connection import redshift_connection_params
 
 # start the Spark session with the required packages to make a connection to the snowflake DB
 spark = SparkSession.builder \
     .appName("StockDataStreamProcessor") \
     .config("spark.jars.packages",
         "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,"
-        "net.snowflake:spark-snowflake_2.12:3.0.0") \
+        "com.amazon.redshift:redshift-jdbc42:2.1.0.12,"
+        "org.apache.spark:spark-avro_2.12:3.5.1") \
     .config("spark.driver.memory", "2g") \
     .config("spark.executor.memory", "2g") \
     .config("spark.driver.maxResultSize", "1g") \
@@ -64,28 +66,32 @@ df = spark.readStream \
   .withColumn("volume",col("volume").cast(FloatType()))
 
 # write micro-batches to Snowflake
-def write_snowflake(batch_df, batch_id):
+def write_redshift(batch_df, batch_id):
     try:
         if batch_df.count() > 0:
+
+            batch_df = batch_df.withColumn("processing_time", current_timestamp())
+
             print(f"Processing batch {batch_id} with {batch_df.count()} records...")
             batch_df.write \
-                .format("snowflake") \
-                .options(**snowflake_connection_params) \
-                .option("dbtable", "RAW_PRICES") \
-                .option("maxOffsetsPerTrigger", "1000") \
+                .format("jdbc") \
+                .options(**redshift_connection_params) \
+                .option("dbtable", os.getenv("REDSHIFT_TABLE")) \
                 .mode("append") \
                 .save()
-            print(f"Batch {batch_id}: Successfully written {batch_df.count()} records to Snowflake")
+            print(f"Batch {batch_id}: Successfully written {batch_df.count()} records added to Redshift.")
         else:
             print(f"Batch {batch_id}: No data to process")
     except Exception as e:
+        # can also add failed batches to S3
         print(f"Batch {batch_id} error: {e}")
 
 # start streaming query
 print("Starting streaming query...")
 query = df.writeStream \
     .trigger(processingTime="10 seconds") \
-    .foreachBatch(write_snowflake) \
+    .foreachBatch(write_redshift) \
+    .option("checkpointLocation", "/tmp/checkpoints/redshift_stock_data") \
     .start()
 
 try:

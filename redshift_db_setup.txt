@@ -1,0 +1,16 @@
+CREATE DATABASE stock_prices;
+CREATE SCHEMA prices_schema;
+CREATE TABLE prices_schema.raw_prices (
+  ticker VARCHAR(10),
+  interval VARCHAR(10),
+  currency VARCHAR(10),
+  exchange_timezone VARCHAR(10),
+  exchange VARCHAR(10),
+  date_timestamp TIMESTAMP,
+  open_price FLOAT,
+  high FLOAT,
+  low FLOAT,
+  close FLOAT,
+  volume FLOAT,
+  processing_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
