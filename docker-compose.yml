@@ -38,6 +38,26 @@ services:
     networks:
       - kafka-net
 
+  spark:
+    image: bitnami/spark:3.5
+    user: root
+    depends_on:
+      - kafka
+    networks:
+      - kafka-net
+    volumes:
+      - ./pyspark_streaming_job:/app/pyspark_streaming_job
+      - ./redshift_connection:/app/redshift_connection
+      - ./.env:/app/.env
+      - ./requirements.txt:/app/requirements.txt
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    environment:
+      - HOME=/tmp
+    ports:
+      - "4040:4040"
+
 networks:
   kafka-net:
     driver: bridge

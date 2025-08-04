@@ -2,5 +2,4 @@ requests
 kafka-python
 dotenv
 pyspark
-pyspark-kafka
 cryptography
