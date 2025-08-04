@@ -12,5 +12,6 @@ redshift_connection_params = {
     "driver": "com.amazon.redshift.jdbc42.Driver",
     "temp_s3_directory": os.getenv("TEMP_S3_DIRECTORY"),
     "aws_iam_role": os.getenv("AWS_IAM_ROLE"),
+    "redshift_table": os.getenv("REDSHIFT_TABLE"),
     "redshift_table": os.getenv("REDSHIFT_TABLE")
 }
