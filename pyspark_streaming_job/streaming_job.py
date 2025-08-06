@@ -28,43 +28,34 @@ from redshift_connection.connection import redshift_connection_params
 # start the Spark session with the required packages to make a connection to the snowflake DB
 spark = SparkSession.builder \
     .appName("KafkaStreaming") \
-    .config("spark.jars.packages", 
-           "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
-           "org.apache.kafka:kafka-clients:3.4.0") \
-    .config("spark.jars.ivy", "/tmp/.ivy2") \
+    .config("spark.jars", "/opt/bitnami/spark/jars/spark-sql-kafka-0-10_2.12-3.5.0.jar, /opt/bitnami/spark/jars/kafka-clients-3.4.0.jar") \
     .getOrCreate()
 
+schema = StructType() \
+    .add("ticker", StringType()) \
+    .add("interval", StringType()) \
+    .add("currency", StringType()) \
+    .add("exchange_timezone", StringType()) \
+    .add("exchange", StringType()) \
+    .add("datetime", StringType()) \
+    .add("open", StringType()) \
+    .add("high", StringType()) \
+    .add("low", StringType()) \
+    .add("close", StringType()) \
+    .add("volume", StringType())
 
+kafka_df = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "kafka:9092") \
+    .option("subscribe", "stock_data") \
+    .load()
 
-spark.sparkContext.setLogLevel("WARN")
+raw_output = kafka_df.writeStream \
+    .outputMode("append") \
+    .format("console") \
+    .option("truncate", False) \
+    .start()
 
-# logging the version to the console for verification 
-print(f"Spark session created successfully")
-print(f"Spark version: {spark.version}")
-print(f"Java version: {spark.sparkContext._jvm.System.getProperty('java.version')}")
+print("spark session created")
 
-# schema = StructType() \
-#     .add("ticker", StringType()) \
-#     .add("interval", StringType()) \
-#     .add("currency", StringType()) \
-#     .add("exchange_timezone", StringType()) \
-#     .add("exchange", StringType()) \
-#     .add("datetime", StringType()) \
-#     .add("open", StringType()) \
-#     .add("high", StringType()) \
-#     .add("low", StringType()) \
-#     .add("close", StringType()) \
-#     .add("volume", StringType())
-
-# # defining the streaming dataframe
-# df = spark.readStream \
-#     .format("kafka") \
-#     .option("kafka.bootstrap.servers", "kafka:9092") \
-#     .option("subscribe", "stock_data") \
-#     .load()
-
-# query = df.writeStream \
-#     .outputMode("append") \
-#     .format("console") \
-#     .option("truncate", "false") \
-#     .start()
+spark.streams.awaitAnyTermination()
