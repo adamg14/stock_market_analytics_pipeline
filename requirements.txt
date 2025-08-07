@@ -1,5 +1,8 @@
 requests
-kafka-python
 dotenv
-pyspark
-cryptography
+
+boto3==1.34.91
+botocore==1.34.91
+
+apache-flink==1.19.0
+apache-flink-ml==2.3.0
