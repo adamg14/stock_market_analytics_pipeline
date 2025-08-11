@@ -1,0 +1,31 @@
+
+                    "ticker",
+                    "interval",
+                    "currency",
+                    "exchange_timezone",
+                    "exchange",
+                    "datetime",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume"
+                 ],
+
+                  """INSERT INTO stock_prices
+        (ticker, interval,  currency, exchange_timezone, exchange, datetime, open, high, low, close, volume, ingestion_time)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        type_info=Types.ROW(
+            [
+                Types.STRING(),
+                Types.STRING(),
+                Types.STRING(),
+                Types.STRING(),
+                Types.SQL_TIMESTAMP(),
+                Types.FLOAT(),
+                Types.FLOAT(),
+                Types.FLOAT(),
+                Types.FLOAT(),
+                Types.FLOAT(),
+                Types.SQL_TIMESTAMP()
+            ]
