@@ -29,3 +29,72 @@
                 Types.FLOAT(),
                 Types.SQL_TIMESTAMP()
             ]
+
+
+import os
+import json
+import base64
+from datetime import datetime
+
+# constant environment variables
+REDSHIFT_CLUSTER - 
+REDSHIFT_USER = os.getenv("REDSHIFT_USER")
+REDSHIFT_DATABASE = os.getenv("REDSHIFT_DATABASE")
+REDSHIFT_ENDPOINT = os.getenv("REDSHIFT_ENDPOINT")
+REDSHIFT_PASSWORD = os.getenv("REDSHIFT_PASSWORD")
+REDSHIFT_PORT= os.getenv("REDSHIFT_PORT")
+print(REDSHIFT_USER)
+
+
+def redshift_database_connection():
+    return psycopg2.connect(
+        host=REDSHIFT_ENDPOINT,
+        port=REDSHIFT_PORT,
+        dbname=REDSHIFT_DATABASE,
+        user=REDSHIFT_USER,
+        password=REDSHIFT_PASSWORD,
+        connect_timeout=10
+    )
+
+
+def lambda_handler(event, context=None):
+    rows = []
+    for record in event.get("Records", []):
+        raw_b64 = record["kinesis"]["data"]
+        payload = json.loads(base64.b64decode(raw_b64))
+        rows.append(
+            (
+            payload["ticker"],
+            payload["interval"],
+            payload["currency"],
+            payload["exchange_timezone"],
+            payload["exchange"],
+            payload["date_timestamp"],
+            float(payload["open_price"]),
+            float(payload["high"]),
+            float(payload["low"]),
+            float(payload["close"]),
+            float(payload["volume"]),
+            datetime.utcnow().isoformat()
+            )
+        )
+    
+    if not rows:
+        return {"status": "no_records"}
+    
+    database_connection = redshift_database_connection()
+    cursor = database_connection.cursor()
+    try:
+        execute_values(
+            cursor,
+            """INSERT INTO stock_prices (ticker, "interval", currency, exchange_timezone, exchange, date_timestamp, open_price, high, low, close, volume, processing_time) VALUES %s""",
+            rows
+        )
+        database_connection.commit()
+        return {"status": "db_load_success"}
+    except:
+        return {"status": "db_load_failed"}
+    finally:
+        database_connection.close()
+
+

@@ -1,85 +1,120 @@
-import json
-import boto3
-from datetime import datetime
-import psycopg2
-from psycopg2.extras import execute_values
-from dotenv import load_dotenv
+# REDSHIFT DATABASE LOAD USING REDSHIFT DATA API
 import os
+import json
 import base64
+import time
+import logging
+from datetime import datetime
+import boto3
+from dotenv import load_dotenv
+
+# loging config
+log = logging.getLogger()
+log.setLevel(logging.INFO)
 
 # Load environment variables
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
 
-# constant environment variables
-REDSHIFT_USER = os.getenv("REDSHIFT_USER")
-REDSHIFT_DATABASE = os.getenv("REDSHIFT_DATABASE")
-REDSHIFT_ENDPOINT = os.getenv("REDSHIFT_ENDPOINT")
-REDSHIFT_PASSWORD = os.getenv("REDSHIFT_PASSWORD")
-REDSHIFT_PORT= os.getenv("REDSHIFT_PORT")
-print(REDSHIFT_USER)
+CLUSTER_ID = os.getenv("REDSHIFT_CLUSTER_ID")
+DATABASE = os.getenv("REDSHIFT_DATABASE")
+USER = os.getenv("REDSHIFT_USER")
+SCHEMA = os.getenv("REDSHIFT_SCHEMA", "public")
+TABLE = os.getenv("REDSHIFT_TABLE")
 
+client = boto3.client("redshift-data", region_name=os.getenv("AWS_DEFAULT_REGION"))
 
-def redshift_database_connection():
-    return psycopg2.connect(
-        host=REDSHIFT_ENDPOINT,
-        port=REDSHIFT_PORT,
-        dbname=REDSHIFT_DATABASE,
-        user=REDSHIFT_USER,
-        password=REDSHIFT_PASSWORD,
-        connect_timeout=10
-    )
+def execute_sql(sql, params):
+    kwargs = {
+        "Database": DATABASE,
+        "Sql": sql,
+        "ClusterIdentifier": CLUSTER_ID,
+        "DbUser": USER,
+        "Parameters": params
+    }
 
+    response = client.execute_statement(**kwargs)
+    sid = response["Id"]
+    while True:
+        d = client.describe_statement(Id=sid)
+        s = d["Status"]
+        if s in ("FINISHED", "FAILED", "ABORTED"):
+            if s != "FINISHED":
+                raise RuntimeError(d.get("Error", "Statement failed"))
+            return d
 
-def lambda_handler(event, context=None):
-    rows = []
-    for record in event.get("Records", []):
-        raw_b64 = record["kinesis"]["data"]
-        payload = json.loads(base64.b64decode(raw_b64))
-        rows.append(
-            (
-            payload["ticker"],
-            payload["interval"],
-            payload["currency"],
-            payload["exchange_timezone"],
-            payload["exchange"],
-            payload["date_timestamp"],
-            float(payload["open_price"]),
-            float(payload["high"]),
-            float(payload["low"]),
-            float(payload["close"]),
-            float(payload["volume"]),
-            datetime.utcnow().isoformat()
+def lambda_handler(event, context):
+    records = event.get("Records", [])
+    if not records:
+        return {"failures": []}
+    else:
+        sql_values = []
+        for record in records:
+            payload = json.loads(
+                base64.b64decode(record["kinesis"]["data"])
             )
-        )
-    
-    if not rows:
-        return {"status": "no_records"}
-    
-    database_connection = redshift_database_connection()
-    cursor = database_connection.cursor()
-    try:
-        execute_values(
-            cursor,
-            """INSERT INTO stock_prices (ticker, "interval", currency, exchange_timezone, exchange, date_timestamp, open_price, high, low, close, volume, processing_time) VALUES %s""",
-            rows
-        )
-        database_connection.commit()
-        return {"status": "db_load_success"}
-    except:
-        return {"status": "db_load_failed"}
-    finally:
-        database_connection.close()
+            try:
+                sql_statement = """
+                    INSERT INTO {schema}.{table}
+                    (ticker,"interval",currency,exchange_timezone,exchange,date_timestamp,open_price,high,low,close,volume,processing_time)
+                    VALUES (:ticker,:interval,:currency,:exchange_timezone,:exchange,CAST(TO_TIMESTAMP(:date_timestamp,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS TIMESTAMP),:open_price,:high,:low,:close,:volume,GETDATE())""".format(schema=SCHEMA, table=TABLE)
+                
+                params = [
+                    {
+                        "name": "ticker",          "value": str(payload["ticker"])
+                    },
+                    {
+                        "name": "interval",        "value": str(payload["interval"])
+                    },
+                    {
+                        "name": "currency",        "value": str(payload["currency"])
+                    },
+                    {
+                        "name": "exchange_timezone","value": str(payload["exchange_timezone"])
+                    },
+                    {
+                        "name": "exchange",        "value": str(payload.get("exchange", ""))
+                    },
+                    {
+                        "name": "date_timestamp",  "value": str(payload["date_timestamp"])
+                    },
+                    {
+                        "name": "open_price",      "value": str(payload["open_price"])
+                    },
+                    {
+                        "name": "high",            "value": str(payload["high"])
+                    },
+                    {
+                        "name": "low",             "value": str(payload["low"])
+                    },
+                    {
+                        "name": "close",           "value": str(payload["close"])
+                    },
+                    {
+                        "name": "volume",          "value": str(payload["volume"])
+                    }
+                ]
+                
+                execute_sql(sql_statement, params=params)
+
+            except Exception as e:
+                log.exception(f"Failed record load")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    """
+    Run a one-off test load locally.
+    Prereqs:
+      - AWS creds in your shell (so boto3 can call the Data API)
+      - env vars set: REDSHIFT_* and table/schema
+    """
     sample_payload = {
         "ticker": "AAPL",
         "interval": "1m",
         "currency": "USD",
         "exchange_timezone": "America/New_York",
         "exchange": "NASDAQ",
-        "date_timestamp": "2025-08-11T14:30:00Z",
-        "open_price": 220.12,
+        "date_timestamp": "2025-08-11T14:30:00Z",   # ISO-8601 Zulu
+        "open_price": 220.13,
         "high": 221.00,
         "low": 219.50,
         "close": 220.44,
@@ -88,9 +123,10 @@ if __name__ == '__main__':
     mock_event = {
         "Records": [{
             "kinesis": {
+                "sequenceNumber": "test-1",
                 "data": base64.b64encode(json.dumps(sample_payload).encode()).decode()
             }
         }]
     }
-
-    print(lambda_handler(mock_event))
+    print(lambda_handler(mock_event, context=None))
+    print("Check Redshift: SELECT * FROM {}.{} ORDER BY date_timestamp DESC LIMIT 5;".format(SCHEMA, TABLE))
