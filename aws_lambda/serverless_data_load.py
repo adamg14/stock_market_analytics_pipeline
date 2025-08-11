@@ -63,6 +63,7 @@ def lambda_handler(event, context=None):
             """INSERT INTO stock_prices (ticker, "interval", currency, exchange_timezone, exchange, date_timestamp, open_price, high, low, close, volume, processing_time) VALUES %s""",
             rows
         )
+        database_connection.commit()
         return {"status": "db_load_success"}
     except:
         return {"status": "db_load_failed"}
