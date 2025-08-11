@@ -6,14 +6,16 @@ import time
 import logging
 from datetime import datetime
 import boto3
-from dotenv import load_dotenv
 
 # loging config
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-# Load environment variables
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../.env"))
+except Exception:
+    pass
 
 CLUSTER_ID = os.getenv("REDSHIFT_CLUSTER_ID")
 DATABASE = os.getenv("REDSHIFT_DATABASE")
@@ -98,35 +100,3 @@ def lambda_handler(event, context):
 
             except Exception as e:
                 log.exception(f"Failed record load")
-
-
-if __name__ == "__main__":
-    """
-    Run a one-off test load locally.
-    Prereqs:
-      - AWS creds in your shell (so boto3 can call the Data API)
-      - env vars set: REDSHIFT_* and table/schema
-    """
-    sample_payload = {
-        "ticker": "AAPL",
-        "interval": "1m",
-        "currency": "USD",
-        "exchange_timezone": "America/New_York",
-        "exchange": "NASDAQ",
-        "date_timestamp": "2025-08-11T14:30:00Z",   # ISO-8601 Zulu
-        "open_price": 220.13,
-        "high": 221.00,
-        "low": 219.50,
-        "close": 220.44,
-        "volume": 123456
-    }
-    mock_event = {
-        "Records": [{
-            "kinesis": {
-                "sequenceNumber": "test-1",
-                "data": base64.b64encode(json.dumps(sample_payload).encode()).decode()
-            }
-        }]
-    }
-    print(lambda_handler(mock_event, context=None))
-    print("Check Redshift: SELECT * FROM {}.{} ORDER BY date_timestamp DESC LIMIT 5;".format(SCHEMA, TABLE))
