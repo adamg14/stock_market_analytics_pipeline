@@ -7,7 +7,7 @@ import logging
 from dotenv import load_dotenv
 from botocore.config import Config
 
-# Initialize logging
+# Initialise logging
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
     level=logging.INFO
@@ -25,7 +25,7 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 BATCH_SIZE = 100  
 POLL_INTERVAL = 1800
 
-# Initialize Kinesis client
+# initialises Kinesis client
 kinesis = boto3.client(
     'kinesis',
     region_name=AWS_REGION,
@@ -60,8 +60,8 @@ def create_kinesis_record(ticker, data_point, meta):
             'currency': meta.get("currency", "USD"),
             'exchange_timezone': meta.get("exchange_timezone", "America/New_York"),
             'exchange': meta.get("exchange", "NASDAQ"),
-            'datetime': data_point["datetime"],
-            'open': data_point["open"],
+            'date_timestamp': data_point["datetime"],
+            'open_price': data_point["open"],
             'high': data_point["high"],
             'low': data_point["low"],
             'close': data_point["close"],

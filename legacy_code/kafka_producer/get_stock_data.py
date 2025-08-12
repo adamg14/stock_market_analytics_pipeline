@@ -50,7 +50,7 @@ def schedule_producer_events():
                     producer.send("stock_data", value=payload)
                     print("Stock data Kafka message sent.")
         # Time series API give the last half hour of time series data
-        time.sleep(60 * 30)
+        time.sleep(60)
 
 
 if __name__ == '__main__':
