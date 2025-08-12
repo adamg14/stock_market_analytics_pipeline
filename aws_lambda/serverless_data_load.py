@@ -1,4 +1,3 @@
-# REDSHIFT DATABASE LOAD USING REDSHIFT DATA API
 import os
 import json
 import base64
@@ -23,7 +22,7 @@ USER = os.getenv("REDSHIFT_USER")
 SCHEMA = os.getenv("REDSHIFT_SCHEMA", "public")
 TABLE = os.getenv("REDSHIFT_TABLE")
 
-client = boto3.client("redshift-data", region_name=os.getenv("AWS_DEFAULT_REGION"))
+client = boto3.client("redshift-data", region_name="eu-north-1")
 
 def execute_sql(sql, params):
     kwargs = {
@@ -58,7 +57,7 @@ def lambda_handler(event, context):
                 sql_statement = """
                     INSERT INTO {schema}.{table}
                     (ticker,"interval",currency,exchange_timezone,exchange,date_timestamp,open_price,high,low,close,volume,processing_time)
-                    VALUES (:ticker,:interval,:currency,:exchange_timezone,:exchange,CAST(TO_TIMESTAMP(:date_timestamp,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS TIMESTAMP),:open_price,:high,:low,:close,:volume,GETDATE())""".format(schema=SCHEMA, table=TABLE)
+                    VALUES (:ticker,:interval,:currency,:exchange_timezone,:exchange,TO_TIMESTAMP(:date_timestamp,'YYYY-MM-DD HH24:MI:SS'),:open_price,:high,:low,:close,:volume,GETDATE())""".format(schema=SCHEMA, table=TABLE)
                 
                 params = [
                     {
