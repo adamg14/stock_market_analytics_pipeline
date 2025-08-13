@@ -2,8 +2,8 @@ import os
 import json
 import logging
 import urllib.request
+import urllib.error
 import boto3
-
 
 try:
     from dotenv import load_dotenv
@@ -22,6 +22,7 @@ TICKERS = [
     "VOD"
     ]
 OUTPUT_SIZE = 5
+REGION = "eu-north-1"
 
 # logging 
 logger = logging.getLogger()
@@ -31,47 +32,99 @@ logger.setLevel(logging.INFO)
 kinesis = boto3.client("kinesis", region_name="eu-north-1")
 
 
+def http_json(url, timeout=10):
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "lambda-stock-ingestor/1.0"}
+    )
+
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw_reponse = response.read()
+        return json.loads(raw_reponse.decode("utf-8"))
+
+
 def get_stock_data(ticker):
-    # gets the data from teh twelvedata API 
-    # in the json format {'meta':{...}, 'values':[{...}, {...}, ...]}
-    """Fetch stock data from API"""
+    url = (
+        "https://api.twelvedata.com/time_series"
+        f"?symbol={urllib.parse.quote(ticker)}"
+        f"&interval=1min&outputsize={OUTPUT_SIZE}&format=JSON&apikey={urllib.parse.quote(API_KEY)}"
+    )
+
     try:
-        url = f"https://api.twelvedata.com/time_series?symbol={ticker}&interval=1min&apikey={API_KEY}"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        print(response.json())
-        return response.json()
+        data = http_json(url)
+        if isinstance(data, dict) and data.get("status") == "error":
+            logger.error(f"Twelve Data error for {ticker}: {data.get('message')}")
+            return None
+        elif "values" not in data or "meta" not in data:
+            logger.error(f"Unexpected API shape for {ticker}: {data}")
+            return None
+        return data
+    except urllib.error.HTTPError as e:
+        logger.error(f"HTTP error for {ticker}: {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        logger.error(f"URL error for {ticker}: {e.reason}")
     except Exception as e:
-        logger.error(f"API request failed for {ticker}: {str(e)}")
-        return None
+        logger.exception(f"Unhandled error fetching {ticker}: {e}")
+    return None
 
 
-def create_kinesis_record(ticker, data_point, meta):
-    # formats the kinesis message in the correct format 
+def kinesis_record(ticker, data, meta):
+    payload = {
+        "ticker": meta.get("symbol", ticker),
+        "interval": meta.get("interval", "1min"),
+        "currency": meta.get("currency", "USD"),
+        "exchange_timezone": meta.get("exchange_timezone", "America/New_York"),
+        "exchange": meta.get("exchange", "NASDAQ"),
+        "date_timestamp": data.get("datetime"),
+        "open_price": data.get("open"),
+        "high": data.get("high"),
+        "low": data.get("low"),
+        "close": data.get("close"),
+        "volume": data.get("volume"),
+    }
+
     return {
-        'Data': json.dumps({
-            'ticker': meta.get("symbol", ticker),
-            'interval': meta.get("interval", "1min"),
-            'currency': meta.get("currency", "USD"),
-            'exchange_timezone': meta.get("exchange_timezone", "America/New_York"),
-            'exchange': meta.get("exchange", "NASDAQ"),
-            'date_timestamp': data_point["datetime"],
-            'open_price': data_point["open"],
-            'high': data_point["high"],
-            'low': data_point["low"],
-            'close': data_point["close"],
-            'volume': data_point["volume"]
-        }),
-        'PartitionKey': ticker
+        "Data": json.dumps(payload).encode("utf-8"),
+        "PartitionKey": ticker,
     }
 
 
-def batch_records():
-    pass
+def chunk(list, size):
+    for i in range(0, len(list), size):
+        yield list[i : i + size]
+    
 
+def batch_records(stream_name, records):
+    if not records:
+        return None
+    else:
+        for batch in chunk(records, 500):
+            response = kinesis.put_records(StreamName=stream_name, Records=batch)
+            failed = response.get("FailedRecordCount")
+            if failed:
+                logger.error(
+                        f"Kinesis error for PK={records.get('PartitionKey')}: "
+                        f"{response.get('ErrorCode')} - {response.get('ErrorMessage')}"
+                    )
+            else:
+                logger.info(
+            f"PutRecords: total={len(batch)} failed={failed} request_id={response.get('ResponseMetadata', {}).get('RequestId')}"
+            )
 
 def lambda_handler(event, context):
-    pass
+    all_records = []
+    
+    for ticker in TICKERS:
+        data = get_stock_data(ticker)
+        if not data:
+            continue
+        meta = data.get("meta", {})
+        values = data.get("values", [])
 
-
+    for data in values:
+            all_records.append(kinesis_record(ticker, data, meta))
+    
+    batch_records(KINESIS_STREAM, all_records)
+    
+    return {"statusCode": 200, "body": f"Published {len(all_records)} records to {KINESIS_STREAM}"}
 
