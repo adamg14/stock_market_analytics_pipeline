@@ -3,6 +3,7 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import urllib.parse
 import boto3
 
 try:
@@ -33,6 +34,7 @@ kinesis = boto3.client("kinesis", region_name="eu-north-1")
 
 
 def http_json(url, timeout=10):
+    """This function makes a HTTP GET request to get the raw stock data from the API and then returns the response in a JSON format"""
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "lambda-stock-ingestor/1.0"}
@@ -69,6 +71,7 @@ def get_stock_data(ticker):
 
 
 def kinesis_record(ticker, data, meta):
+    """This function converts the raw JSON response from the API into a formatted AWS kinesis record"""
     payload = {
         "ticker": meta.get("symbol", ticker),
         "interval": meta.get("interval", "1min"),
@@ -95,6 +98,7 @@ def chunk(list, size):
     
 
 def batch_records(stream_name, records):
+    """Sends a batch of formatted data points to Kinesis simulatenously"""
     if not records:
         return None
     else:
@@ -121,7 +125,7 @@ def lambda_handler(event, context):
         meta = data.get("meta", {})
         values = data.get("values", [])
 
-    for data in values:
+        for data in values:
             all_records.append(kinesis_record(ticker, data, meta))
     
     batch_records(KINESIS_STREAM, all_records)

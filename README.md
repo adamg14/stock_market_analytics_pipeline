@@ -10,6 +10,8 @@ A production pipeline that streams live stock data into Amazon Redshift using Am
 [AWS Kinesis Producer](kinesis_stream/producer.py)
 This script sends requests to a stock data API to receive data on pre-selected stocks. It then transforms this raw data into a structured Kinesis record and then sends the stock data to AWS Kinesis for a temporary real-time storage. 
 
+This function is deployed using AWS Lambda where a CloudWatch EventBridge rule triggers the function every 5 minutes, automating the trigger of this function. The IAM role requirements for this function include Full Kinesis Access to write records to the AWS Kinesis data stream and Writing logs to cloudwatch for automated triggers.
+
 ## AWS Serverless Lambda Function
 [AWS Lambda Function](aws_lambda/serverless_data_load.py)
 This function is deployed to AWS, to allow it to run serverless based on a trigger (Data streaming into AWS Kinesis).
