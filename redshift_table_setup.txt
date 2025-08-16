@@ -12,3 +12,27 @@ CREATE TABLE stock_prices (
     volume BIGINT NOT NULL,
     processing_time TIMESTAMP NOT NULL
 )
+
+CREATE TABLE public.stock_prices_unique AS
+SELECT 
+	ticker,
+    interval,
+    currency,
+    exchange_timezone,
+    exchange,
+    date_timestamp,
+    open_price,
+    high,
+    low,
+    close,
+    volume,
+    processing_time
+FROM (
+  SELECT
+  	*,
+  	ROW_NUMBER() OVER(
+      PARTITION BY ticker, date_timestamp
+    ORDER BY processing_time ASC) AS row_num
+  FROM public.stock_prices
+)
+WHERE row_num = 1
